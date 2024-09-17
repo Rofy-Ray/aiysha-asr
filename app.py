@@ -1,0 +1,103 @@
+import os
+import subprocess
+import tempfile
+import logging
+import uuid
+import json
+from google.cloud import storage
+from flask import Flask, request, jsonify
+
+logging.basicConfig(level=logging.DEBUG)
+
+RIVA_SERVER = os.getenv('RIVA_SERVER')
+RIVA_FUNCTION_ID = os.getenv('RIVA_FUNCTION_ID')
+RIVA_API_KEY = os.getenv('RIVA_API_KEY')
+GCS_BUCKET_NAME = os.getenv('GCS_BUCKET_NAME')
+
+app = Flask(__name__)
+
+def run_riva_asr(input_file):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--server", default=RIVA_SERVER)
+    parser.add_argument("--use-ssl", action="store_true")
+    parser.add_argument("--metadata", nargs=2, action="append")
+    parser.add_argument("--language-code", default='en-US')
+    parser.add_argument("--input-file")
+
+    args_list = [
+        "--server", RIVA_SERVER,
+        "--use-ssl",
+        "--metadata", "function-id", RIVA_FUNCTION_ID,
+        "--metadata", "authorization", f"Bearer {RIVA_API_KEY}",
+        "--language-code", 'en-US',
+        "--input-file", input_file
+    ]
+
+    args, unknown_args = parser.parse_known_args(args_list)
+
+    command = ["python", "transcribe_file_offline.py"] + args_list
+    
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        logging.debug(f"Command output: {result.stdout}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Command failed with exit code {e.returncode}")
+        logging.error(f"Error output: {e.stderr}")
+        logging.error(f"Error output: {e.output}")
+        raise
+
+def save_text_to_gcs(text):
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(GCS_BUCKET_NAME)
+    
+    filename = f"{uuid.uuid4()}.txt"
+    blob = bucket.blob(filename)
+    blob.upload_from_string(text)
+    
+    return blob.public_url
+
+def extract_transcript(asr_output):
+    try:
+        results = json.loads(asr_output.split('\n')[0])
+        return results['results'][0]['alternatives'][0]['transcript']
+    except (json.JSONDecodeError, KeyError, IndexError):
+        final_transcript_line = [line for line in asr_output.split('\n') if line.startswith("Final transcript: ")]
+        if final_transcript_line:
+            return final_transcript_line[0].split("Final transcript: ")[1].strip()
+    raise ValueError("Unable to extract transcript from ASR output")
+
+@app.route('/asr', methods=['POST'])
+def asr_handler():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if file and file.filename.split('.')[-1].lower() in ['wav', 'opus', 'ogg']:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file.filename.split('.')[-1]}") as temp_file:
+            file.save(temp_file.name)
+            input_file = temp_file.name
+        
+        try:
+            asr_output = run_riva_asr(input_file)
+            transcript = extract_transcript(asr_output)
+            text_url = save_text_to_gcs(transcript)
+            
+            return jsonify({
+                'text_url': text_url,
+                'text': transcript
+            })
+        except Exception as e:
+            logging.error(f"An error occurred: {str(e)}")
+            return jsonify({'error': str(e)}), 500
+        finally:
+            if os.path.exists(input_file):
+                os.unlink(input_file)
+    else:
+        return jsonify({'error': 'Invalid file type. Please upload a WAV, OPUS, or OGG file.'}), 400
+
+if __name__ == "__main__":
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
