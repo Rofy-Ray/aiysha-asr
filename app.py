@@ -4,6 +4,7 @@ import tempfile
 import logging
 import uuid
 import json
+import argparse
 from google.cloud import storage
 from flask import Flask, request, jsonify
 
@@ -39,7 +40,7 @@ def run_riva_asr(input_file):
     
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True)
-        logging.debug(f"Command output: {result.stdout}")
+        return result.stdout
     except subprocess.CalledProcessError as e:
         logging.error(f"Command failed with exit code {e.returncode}")
         logging.error(f"Error output: {e.stderr}")
@@ -57,13 +58,23 @@ def save_text_to_gcs(text):
     return blob.public_url
 
 def extract_transcript(asr_output):
-    try:
-        results = json.loads(asr_output.split('\n')[0])
-        return results['results'][0]['alternatives'][0]['transcript']
-    except (json.JSONDecodeError, KeyError, IndexError):
-        final_transcript_line = [line for line in asr_output.split('\n') if line.startswith("Final transcript: ")]
-        if final_transcript_line:
-            return final_transcript_line[0].split("Final transcript: ")[1].strip()
+    if not asr_output:
+        raise ValueError("ASR output is empty. Check the run_riva_asr function.")
+    
+    lines = asr_output.strip().split('\n')
+    
+    for line in reversed(lines): 
+        if line.startswith("Final transcript:"):
+            return line.split("Final transcript:")[1].strip()
+    
+    transcript = ""
+    for line in lines:
+        if line.strip().startswith("transcript:"):
+            transcript += line.split("transcript:")[1].strip().strip('"') + " "
+    
+    if transcript:
+        return transcript.strip()
+    
     raise ValueError("Unable to extract transcript from ASR output")
 
 @app.route('/asr', methods=['POST'])
@@ -83,6 +94,9 @@ def asr_handler():
         
         try:
             asr_output = run_riva_asr(input_file)
+            if not asr_output:
+                raise ValueError("ASR output is empty")
+            
             transcript = extract_transcript(asr_output)
             text_url = save_text_to_gcs(transcript)
             
@@ -90,9 +104,12 @@ def asr_handler():
                 'text_url': text_url,
                 'text': transcript
             })
+        except ValueError as e:
+            logging.error(f"Transcript extraction error: {str(e)}")
+            return jsonify({'error': str(e)}), 500
         except Exception as e:
             logging.error(f"An error occurred: {str(e)}")
-            return jsonify({'error': str(e)}), 500
+            return jsonify({'error': 'An unexpected error occurred during processing'}), 500
         finally:
             if os.path.exists(input_file):
                 os.unlink(input_file)
