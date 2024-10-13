@@ -1,4 +1,6 @@
-google-cloud-storage
-nvidia-riva-client
-flask
-gunicorn
+google-cloud-storage==2.18.2
+nvidia-riva-client==2.16.0
+Flask==3.0.3
+gunicorn==23.0.0
+Flask-Cors==5.0.0
+python-dotenv==1.0.1

@@ -5,10 +5,15 @@ import logging
 import uuid
 import json
 import argparse
+from dotenv import load_dotenv
 from google.cloud import storage
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 
-logging.basicConfig(level=logging.DEBUG)
+load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 RIVA_SERVER = os.getenv('RIVA_SERVER')
 RIVA_FUNCTION_ID = os.getenv('RIVA_FUNCTION_ID')
@@ -16,6 +21,7 @@ RIVA_API_KEY = os.getenv('RIVA_API_KEY')
 GCS_BUCKET_NAME = os.getenv('GCS_BUCKET_NAME')
 
 app = Flask(__name__)
+CORS(app)
 
 def run_riva_asr(input_file):
     parser = argparse.ArgumentParser()
@@ -42,9 +48,9 @@ def run_riva_asr(input_file):
         result = subprocess.run(command, check=True, capture_output=True, text=True)
         return result.stdout
     except subprocess.CalledProcessError as e:
-        logging.error(f"Command failed with exit code {e.returncode}")
-        logging.error(f"Error output: {e.stderr}")
-        logging.error(f"Error output: {e.output}")
+        logger.error(f"Command failed with exit code {e.returncode}")
+        logger.error(f"Error output: {e.stderr}")
+        logger.error(f"Error output: {e.output}")
         raise
 
 def save_text_to_gcs(text):
@@ -94,6 +100,7 @@ def asr_handler():
         
         try:
             asr_output = run_riva_asr(input_file)
+            logger.info(f"ASR OUTPUT: {asr_output}")
             if not asr_output:
                 raise ValueError("ASR output is empty")
             
@@ -105,10 +112,10 @@ def asr_handler():
                 'text': transcript
             })
         except ValueError as e:
-            logging.error(f"Transcript extraction error: {str(e)}")
+            logger.error(f"Transcript extraction error: {str(e)}")
             return jsonify({'error': str(e)}), 500
         except Exception as e:
-            logging.error(f"An error occurred: {str(e)}")
+            logger.error(f"An error occurred: {str(e)}")
             return jsonify({'error': 'An unexpected error occurred during processing'}), 500
         finally:
             if os.path.exists(input_file):
