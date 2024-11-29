@@ -61,7 +61,7 @@ class GCSStorage:
         self.client = storage.Client()
         self.bucket = self.client.bucket(GCS_BUCKET_NAME)
 
-    def save_text(self, text: str) -> None:
+    def save_text(self, text: str):
         """Save text to GCS and return public URL"""
         filename = f"{uuid.uuid4()}.txt"
         blob = self.bucket.blob(filename)
