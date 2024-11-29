@@ -61,12 +61,12 @@ class GCSStorage:
         self.client = storage.Client()
         self.bucket = self.client.bucket(GCS_BUCKET_NAME)
 
-    def save_text(self, text: str) -> str:
+    def save_text(self, text: str) -> None:
         """Save text to GCS and return public URL"""
         filename = f"{uuid.uuid4()}.txt"
         blob = self.bucket.blob(filename)
         blob.upload_from_string(text)
-        return blob.public_url
+        # return blob.public_url
 
 asr_processor = ASRProcessor()
 gcs_storage = GCSStorage()
@@ -113,5 +113,5 @@ def asr_handler():
         logger.error(f"Error processing request: {str(e)}", exc_info=True)
         return jsonify({'error': 'An unexpected error occurred during processing'}), 500
 
-if __name__ == "__main__":
-    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+# if __name__ == "__main__":
+#     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
