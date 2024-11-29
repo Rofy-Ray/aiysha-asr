@@ -38,20 +38,21 @@ class ASRProcessor:
             self.model = self.model.to(self.device)
             logger.info("ASR model loaded successfully")
 
-    def process_audio(self, audio_path: str) -> Tuple[str, float]:
+    def process_audio(self, audio_path: str) -> str:
         """
         Process audio file and return transcription
-        Returns: tuple of (transcription, duration_in_seconds)
+        Returns: transcription
+        # Returns: tuple of (transcription, duration_in_seconds)
         """
         audio, sample_rate = librosa.load(audio_path, sr=16000, mono=True)
-        duration = len(audio) / sample_rate
+        # duration = len(audio) / sample_rate
 
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_wav:
             sf.write(temp_wav.name, audio, sample_rate, format='WAV')
             
             try:
                 transcription = self.model.transcribe([temp_wav.name])[0]
-                return transcription, duration
+                return transcription
             finally:
                 os.unlink(temp_wav.name)
 
@@ -95,15 +96,14 @@ def asr_handler():
             file.save(temp_file.name)
             
             try:
-                transcript, duration = asr_processor.process_audio(temp_file.name)
+                transcript = asr_processor.process_audio(temp_file.name)
                 
-                text_url = gcs_storage.save_text(transcript)
+                gcs_storage.save_text(transcript)
+                
+                # text_url = gcs_storage.save_text(transcript)
                 
                 return jsonify({
-                    'text_url': text_url,
-                    'text': transcript,
-                    'duration': duration,
-                    'model': 'nvidia/parakeet-ctc-1.1b'
+                    'text': transcript
                 })
             
             finally:
